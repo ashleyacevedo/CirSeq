@@ -1,0 +1,12 @@
+Consensus Generation Stats
+0	Poor quality
+96	No repeats detected
+3102	Abnormal repeat length
+14478	Low sequence identity between repeats
+82324	Consensus sequences
+100000	Total reads
+
+82.32	% Consensus sequence generated
+
+65360	Aligned consensus sequences
+79.39	% Consensus sequences aligned

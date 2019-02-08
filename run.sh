@@ -46,7 +46,7 @@ bowtie2 -q --phred33 --no-unal --no-hd --no-sq --local -x ${REFIDX} -U ${WORKDIR
 python ${SCRIPTDIR}/preprocessing_3.py ${WORKDIR} 
 
 cat ${WORKDIR}/3_alignment.sam.gz ${WORKDIR}/7_alignment.sam.gz ${WORKDIR}/11_alignment.sam.gz > ${WORKDIR}/data.sam.gz
-rm -f ${WORKDIR}/3_alignment.sam.gz ${WORKDIR}/7_alignment.sam.gz ${WORKDIR}/11_alignment.sam.gz ${WORKDIR}/2_alignment.sam.gz ${WORKDIR}/4_rearranged.sam.gz ${WORKDIR}/5_rotated.fastq.gz ${WORKDIR}/6_alignment.sam.gz ${WORKDIR}/8_rotated.fastq.gz ${WORKDIR}/9_alignment.sam.gz ${WORKDIR}/10_alignment.sam.gz
+rm -f ${WORKDIR}/3_alignment.sam.gz ${WORKDIR}/7_alignment.sam.gz ${WORKDIR}/11_alignment.sam.gz ${WORKDIR}/2_alignment.sam.gz ${WORKDIR}/4_rearranged.fastq.gz ${WORKDIR}/5_rotated.fastq.gz ${WORKDIR}/6_alignment.sam.gz ${WORKDIR}/8_rotated.fastq.gz ${WORKDIR}/9_alignment.sam.gz ${WORKDIR}/10_alignment.sam.gz
 
 python ${SCRIPTDIR}/QualityFilter.py ${WORKDIR} ${REFFILE}
 

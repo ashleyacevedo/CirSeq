@@ -3,12 +3,12 @@ import numpy as np
 
 workdir = sys.argv[1]
 reffile = sys.argv[2]
-#QualityThreshold = OPTION if no option, QualityThreshold=20
+QualityThreshold=20
 
-infile = gzip.open(workdir + "/data.sam.gz","rb")
-parameterfile = open(workdir + "/ProcessingStats.txt","r")
-outfile1 = open(workdir + "/Q%sthreshold.txt" % str(QualityThreshold),"w")
-outfile2 = open(workdir + "/QualityMetrics.txt","w")
+infile = gzip.open(workdir + "data.sam.gz","rb")
+parameterfile = open(workdir + "ProcessingStats.txt","r")
+outfile1 = open(workdir + "Q%sthreshold.txt" % str(QualityThreshold),"w")
+outfile2 = open(workdir + "QualityMetrics.txt","w")
 
 reference = open(reffile,"r")
 reference.readline()
@@ -44,8 +44,8 @@ for line in infile:
 		AlignedReadCount += 1
 
 print "--------------------------------------"
-print "Q", "\t", "Mismatches", "\t", "Total Bases", "\t", "Ts", "\t", "Tv"
-outfile2.write("Q" + "\t" + "Mismatches" + "\t" + "Total Bases" + "\t" + "Ts" + "\t" + "Tv" + "\n")
+print "Q", "\t", "Mismatches", "\t", "TotalBases", "\t", "Ts", "\t", "Tv"
+outfile2.write("Q" + "\t" + "Mismatches" + "\t" + "TotalBases" + "\t" + "Ts" + "\t" + "Tv" + "\n")
 
 j = 0
 Athreshold = [0]*len(reference)
@@ -104,13 +104,13 @@ i = 1
 for line in parameterfile:
 	if i == 6:
 		line = line.split()
-		TotalConsnsusSequences = float(line[0])
+		TotalConsensusSequences = float(line[0])
 	i += 1
 
 parameterfile.close()
 parameterfile = open(workdir + "/ProcessingStats.txt", "a")
 parameterfile.write("\n" + str(AlignedReadCount) + "\tAligned consensus sequences\n")
-parameterfile.write(str(AlignedReadCount/TotalConsensusSequences) + "\t% Consensus sequences aligned\n")
+parameterfile.write(str(round((AlignedReadCount/TotalConsensusSequences)*100, 2)) + "\t% Consensus sequences aligned\n")
 parameterfile.close()
 
 infile.close()

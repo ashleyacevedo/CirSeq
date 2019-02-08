@@ -56,7 +56,7 @@ parameterfile1.write(str(AbnormalRepeatLength) + "\tAbnormal repeat length\n")
 parameterfile1.write(str(LowIdentity) + "\tLow sequence identity between repeats\n")
 parameterfile1.write(str(ConsensusSequences) + "\tConsensus sequences\n")
 parameterfile1.write(str(TotalReads) + "\tTotal reads\n" + "\n")
-parameterfile1.write(str((ConsensusSequences*100.0)/TotalReads) + "\t% Consensus sequence generated\n")
+parameterfile1.write(str(round((ConsensusSequences*100.0)/TotalReads, 2)) + "\t% Consensus sequence generated\n")
 
 #write lengths of consensus reads
 parameterfile2.write("Length\tNumberOfReads\n")
