@@ -1,5 +1,8 @@
 from ConsensusModule import *
-import sys,os,gzip,numpy
+import sys
+import os
+import gzip
+import numpy
 
 #check args
 if len(sys.argv) < 2:
@@ -30,7 +33,7 @@ LowIdentity = 0
 ConsensusSequences = 0
 TotalReads = 0
 
-RepeatLengths = [0]*100
+RepeatLengths = [0]*115
 
 #read through fastq.gz files, generate consensus sequences using ConsensusModule and report read parameters
 for f in infiles:

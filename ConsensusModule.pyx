@@ -1,141 +1,261 @@
-def Consensus(infile, outfile):
-	
-    import math
-    from scipy.stats import mode
-    from itertools import izip
-	
-    cdef int i
-    cdef int counter_PoorQuality
-    cdef int counter_NoRepeats
-    cdef int counter_AbnormalRepeatLength
-    cdef int counter_LowIdentity
-    cdef int counter_TotalReads
-    cdef int counter_ConsensusSequences
+"""
+ConsensusModule converts tandem repeat reads to consensus sequences.
 
-    cdef int StartPosition
-    cdef int Identity
+Author: Ashley Acevedo
+"""
 
-    counter_PoorQuality = 0
-    counter_NoRepeats = 0
-    counter_AbnormalRepeatLength = 0
-    counter_LowIdentity = 0
-    counter_TotalReads = 0
-    counter_ConsensusSequences = 0
+# Import required packages
+import math
+from scipy.stats import mode
+from itertools import izip
 
-    RepeatLengths = [0]*100
-	
-    while True:
-		
-        SequenceID = infile.readline()
-		
-        if not SequenceID:
-            break
+def GetRepLength(Sequence):
 
-        counter_TotalReads += 1
+  """
+  GetRepLength identifies tandem repeats and returns their length.
 
-        Sequence = infile.readline()
-        Sequence = Sequence.rstrip("\n")
-        EmptyLine = infile.readline()
-        QualityScores = infile.readline()
-        QualityScores = QualityScores.rstrip("\n")
-	
-        #Remove the first base which can be error prone
-        Sequence = Sequence[1:]
-        QualityScores = QualityScores[1:]
-	
-        #Remove/count reads with more than 30% Ns
-        if Sequence.count("N") > 90:
-            counter_PoorQuality += 1
-			
+  Repeats are identified by locating and saving the distance between substrings.
+  The modal distance between substrings (excluding the distance between the last
+  substring and the end of the sequence, which is unlikely to be the exact
+  repeat length) is the expected repeat length.
+
+  When no repeats are identified, the function returns 0.
+
+  When repeats are either too short (often occurs with repetitive or low
+  complexity sequence and with aberent reads) or too long the function returns 1.
+
+  When appropriately sized repeats are identified, the function returns the
+  repeat length.
+  """
+
+  cdef int i
+  cdef int repLength
+
+  SubstringLengths = []
+  i = 1
+  while i <= len(Sequence) - 8:
+    Substrings = Sequence.split(Sequence[i:i+8])
+    for String in Substrings[1:-1]:
+      SubstringLengths.append(len(String))
+    i += 1
+
+  if len(SubstringLengths) == 0:
+    repLength = 0
+  else:
+    repLength = int(mode(SubstringLengths)[0][0]) + 8
+    if repLength  < 25 or repLength > math.floor(len(Sequence)/3):
+      repLength = 1
+
+  return repLength
+
+def OptimizeReps(Sequence, Qscores, repLength):
+
+  """
+  OptimizeReps scores the identity of all possible repeat alignments and
+  returns the optimal start site to slice the repeats from the input sequence.
+
+  This procedure is applied because some reads are recombinant. That is, the
+  beginning and ending of an input sequence do not originate from the same RNA
+  molecule due to RT or PCR cross-overs. Thus, initiating slicing of the repeats
+  from the first position in the input sequence may incorporate non-homologus
+  sequence into the alignment and reduce the quality of the consensus sequence.
+
+  Input sequence for which no repeat alignment results in an identity score
+  above 0.85 are omitted from futher analysis and the function returns 0.
+
+  For input sequences that pass the identity threshold, the function returns 1,
+  the sliced repeats and sliced quality scores for those repeats.
+  """
+
+  cdef int i
+  cdef int identity
+
+  identityScores = []
+  i = 0
+  while i < len(Sequence) - repLength * 3:
+    identity = 0
+    rep1 = Sequence[i:i+repLength]
+    rep2 = Sequence[i+repLength:i+repLength*2]
+    rep3 = Sequence[i+repLength*2:i+repLength*3]
+    for repBase1, repBase2, repBase3 in zip(rep1, rep2, rep3):
+      if repBase1 == repBase2 == repBase3 and repBase1 != "N":
+        identity += 2
+      elif repBase1 == repBase2 and repBase1 != "N":
+        identity += 1
+      elif repBase1 == repBase3 and repBase1 != "N":
+        identity += 1
+      elif repBase2 == repBase3 and repBase2 != "N":
+        identity += 1
+    identityScores.append(identity)
+    i += 1
+
+  if max(identityScores)/(repLength*2.0) < 0.85:
+    return 0, "", "", "", "", "", ""
+  else:
+    start = identityScores.index(max(identityScores))
+    rep1 = Sequence[start:start+repLength]
+    rep2 = Sequence[start+repLength:start+repLength*2]
+    rep3 = Sequence[start+repLength*2:start+repLength*3]
+    q1 = Qscores[start:start+repLength]
+    q2 = Qscores[start+repLength:start+repLength*2]
+    q3 = Qscores[start+repLength*2:start+repLength*3]
+    return 1, rep1, rep2, rep3, q1, q2, q3
+
+def ConsensusProb(score):
+  """Returns error probability for a base matching the consensus."""
+  return 10**((ord(score)-33)/-10.0)
+
+def NonConsensusProb(score):
+  """Returns error probability for a base not matching the consensus."""
+  return 1-(1/3.0)*(10**((ord(score)-33)/-10.0))
+
+def CombineReps(rep1, rep2, rep3, q1, q2, q3):
+
+  """
+  CombineReps transforms aligned repeats to a consensus sequence and computes
+  combined quality scores.
+
+  The consensus sequence is the majority base in the repeat alignment. When no
+  majority exists (when each repeat has a different base at the same position),
+  the base with the highest quality score (lowest error probability) is chosen
+  as the consensus base.
+
+  Base-calling error probabilities for consensus bases are the product of the
+  error probabilities for each repeat base. Error probabilities for each repeat
+  base are derived from quality scores (stored as ascii characters) on the
+  PHRED+33 scale. The error probabilities of Ns are set to 1 since they are, by
+  nature, incorrectly called.
+  """
+
+  cdef float prob1
+  cdef float prob2
+  cdef float prob3
+  cdef float probCombined
+
+  consensus = ""
+  consensusQ = ""
+  for repBase1, repBase2, repBase3, score1, score2, score3 in zip(rep1, rep2, rep3, q1, q2, q3):
+    if repBase1 == repBase2 == repBase3 and repBase1 != "N":
+      consensus += repBase1
+      consensusQ += chr(int(round(((ord(score1) + ord(score2) + ord(score3) - 99)/3.0))) + 33)
+    else:
+      if repBase1 == repBase2 and repBase1 != "N":
+        consensus += repBase1
+        prob1 = ConsensusProb(score1)
+        prob2 = ConsensusProb(score2)
+        prob3 = NonConsensusProb(score3)
+      elif repBase1 == repBase3 and repBase1 != "N":
+        consensus += repBase1
+        prob1 = ConsensusProb(score1)
+        prob2 = NonConsensusProb(score2)
+        prob3 = ConsensusProb(score3)
+      elif repBase2 == repBase3 and repBase2 != "N":
+        consensus += repBase2
+        prob1 = NonConsensusProb(score1)
+        prob2 = ConsensusProb(score2)
+        prob3 = ConsensusProb(score3)
+      else:
+        scores = [ord(score1), ord(score2), ord(score3)]
+        repBases = [repBase1, repBase2, repBase3]
+        consensus += repBases[scores.index(max(scores))]
+        #Sort lists of Bases and Quality scores based on Quality scores
+        sortedData = sorted(izip(repBases, scores), key=lambda x: x[1])
+        repBases, scores = [[x[i] for x in sortedData] for i in range(2)]
+        if repBases[0] == "N":
+          prob1 = 1
         else:
-		
-            #Identify all possible sets of repeats and save their lengths
-            SubstringLengths = []
-            i = 1
-            while i <= 291:
-                Substrings = Sequence.split(Sequence[i:i+8])
-                for String in Substrings[1:-1]: #[1:-1] avoids ends which will likely not be the exact repeat length
-                    SubstringLengths.append(len(String))
-                i += 1
-			
-            #Remove/count reads with no detectable repeats
-            if len(SubstringLengths) == 0:
-                counter_NoRepeats += 1
-				
-            else:
-                SubstringLengthsMode = mode(SubstringLengths) #mode is an array [0][0] = mode, [1][0] = counts of mode in list
-				
-                #Remove/count reads with abnormal/non-ideal repeat length
-                if SubstringLengthsMode[0][0] < 17 or SubstringLengthsMode[0][0] > 91:
-                    counter_AbnormalRepeatLength += 1
+          prob1 = NonConsensusProb(chr(scores[0]))
+        if repBases[1] == "N":
+          prob2 = 1
+        else:
+          prob2 = NonConsensusProb(chr(scores[1]))
+        if repBases[2] == "N":
+          prob3 = 1
+        else:
+          prob3 = ConsensusProb(chr(scores[2]))
+      probCombined = prob1 * prob2 * prob3
+      consensusQ += chr(int(round(-10*math.log10(probCombined)/3.0))+33)
 
-                else:
-                    #Optimize sequence identity, all possible sets of repeats are considered
-                    RepeatLength = int(SubstringLengthsMode[0][0]) + 8
-                    RepeatLengths[RepeatLength] += 1
-                    RepeatSetIdentities = []
-                    i = 0
-                    while i < 299 - (RepeatLength*3):
-                        Identity = 0
-                        for RepeatBase1, RepeatBase2, RepeatBase3 in zip(Sequence[i:i+RepeatLength], Sequence[i+RepeatLength:i+RepeatLength*2], Sequence[i+RepeatLength*2:i+RepeatLength*3]):
-                            if RepeatBase1 == RepeatBase2 == RepeatBase3 and RepeatBase1 != "N":
-                                Identity += 2
-                            elif RepeatBase1 == RepeatBase2 and RepeatBase1 != "N":
-                                Identity += 1
-                            elif RepeatBase1 == RepeatBase3 and RepeatBase1 != "N":
-                                Identity += 1
-                            elif RepeatBase2 == RepeatBase3 and RepeatBase2 != "N":
-                                Identity += 1
-                        RepeatSetIdentities.append(Identity)
-                        i += 1
-					
-                    #Select the highest identity set of repeats that is at least 85% identity
-                    if max(RepeatSetIdentities)/(RepeatLength*2.0) < 0.85:
-                        counter_LowIdentity += 1
-                    else:
-                        counter_ConsensusSequences += 1
-                        StartPosition = RepeatSetIdentities.index(max(RepeatSetIdentities))
-		
-                        #Form consensus sequences and recalculate quality scores
-                        ConsensusSequence = ""
-                        ReCalculatedQualityScores = ""
-                        for RepeatBase1, RepeatBase2, RepeatBase3, RepeatQualityScore1, RepeatQualityScore2, RepeatQualityScore3 in zip(Sequence[StartPosition:StartPosition+RepeatLength], Sequence[StartPosition+RepeatLength:StartPosition+RepeatLength*2], Sequence[StartPosition+RepeatLength*2:StartPosition+RepeatLength*3],QualityScores[StartPosition:StartPosition+RepeatLength], QualityScores[StartPosition+RepeatLength:StartPosition+RepeatLength*2], QualityScores[StartPosition+RepeatLength*2:StartPosition+RepeatLength*3]):
-                            if RepeatBase1 == RepeatBase2 == RepeatBase3 and RepeatBase1 != "N":
-                                ConsensusSequence += RepeatBase1
-                                ReCalculatedQualityScores += chr(int(round(((ord(RepeatQualityScore1) + ord(RepeatQualityScore2) + ord(RepeatQualityScore3) - 99)/3.0))) + 33)
-                            elif RepeatBase1 == RepeatBase2 and RepeatBase1 != "N":
-                                ConsensusSequence += RepeatBase1
-                                RawProbability = (10**((ord(RepeatQualityScore1)-33)/-10.0))*(10**((ord(RepeatQualityScore2)-33)/-10.0))*(1-(1/3.0)*(10**((ord(RepeatQualityScore3)-33)/-10.0)))
-                                ReCalculatedQualityScores += chr(int(round(-10*math.log10(RawProbability)/3.0))+33)
-                            elif RepeatBase1 == RepeatBase3 and RepeatBase1 != "N":
-                                ConsensusSequence += RepeatBase1
-                                RawProbability = (10**((ord(RepeatQualityScore1)-33)/-10.0))*(10**((ord(RepeatQualityScore3)-33)/-10.0))*(1-(1/3.0)*(10**((ord(RepeatQualityScore2)-33)/-10.0)))
-                                ReCalculatedQualityScores += chr(int(round(-10*math.log10(RawProbability)/3.0))+33)
-                            elif RepeatBase2 == RepeatBase3 and RepeatBase2 != "N":
-                                ConsensusSequence += RepeatBase2
-                                RawProbability = (10**((ord(RepeatQualityScore3)-33)/-10.0))*(10**((ord(RepeatQualityScore2)-33)/-10.0))*(1-(1/3.0)*(10**((ord(RepeatQualityScore1)-33)/-10.0)))
-                                ReCalculatedQualityScores += chr(int(round(-10*math.log10(RawProbability)/3.0))+33)
-                            else: #All bases are different or Ns
-                                RepeatQualityScores = [ord(RepeatQualityScore1), ord(RepeatQualityScore2), ord(RepeatQualityScore3)]
-                                RepeatBases = [RepeatBase1, RepeatBase2, RepeatBase3]
-                                ConsensusSequence += RepeatBases[RepeatQualityScores.index(max(RepeatQualityScores))]
-                                #Sort lists of Bases and Quality scores based on Quality scores
-                                SortedBasesAndQualityScores = sorted(izip(RepeatBases, RepeatQualityScores), key=lambda x: x[1])
-                                RepeatBases, RepeatQualityScores = [[x[i] for x in SortedBasesAndQualityScores] for i in range(2)]
-                                if RepeatBases[0] == "N":
-                                    RawProbability1 = 1
-                                else:
-                                    RawProbability1	= 1-(1/3.0)*(10**((RepeatQualityScores[0]-33)/-10.0))
-                                if RepeatBases[1] == "N":
-                                    RawProbability2 = 1
-                                else:
-                                    RawProbability2	= 1-(1/3.0)*(10**((RepeatQualityScores[1]-33)/-10.0))
-                                RawProbability = RawProbability1 * RawProbability2 * (10**((RepeatQualityScores[2]-33)/-10.0))
-                                ReCalculatedQualityScores += chr(int(round(-10*math.log10(RawProbability)/3.0))+33)
+  return consensus, consensusQ
+
+def Consensus(infile, outfile):
+
+  """
+  Consensus reads in FASTQ formatted tandem-repeat sequence reads and writes
+  processed consensus sequences and computed quality scores to a new FASTQ
+  formatted file.
+
+  This function processes sequences using other functions in the ConsensusModule.
+  In addition to writing processed sequences, this function also tabulates the
+  number of sequences with repeats of different lengths and keeps track of the
+  number of reads that fail to form consensus sequences for a variety of reasons
+  (noted in other functions in this module).
+  """
+
+  cdef int counter_PoorQuality
+  cdef int counter_NoRepeats
+  cdef int counter_AbnormalRepeatLength
+  cdef int counter_LowIdentity
+  cdef int counter_TotalReads
+  cdef int counter_ConsensusSequences
+
+  cdef int repLength
+  cdef int flag
+
+  counter_PoorQuality = 0
+  counter_NoRepeats = 0
+  counter_AbnormalRepeatLength = 0
+  counter_LowIdentity = 0
+  counter_TotalReads = 0
+  counter_ConsensusSequences = 0
+
+  RepeatLengths = [0]*115
+	
+  while True:
+
+    # Read FASTQ formatted sequence entry
+    SequenceID = infile.readline()
+    Sequence = infile.readline()
+    EmptyLine = infile.readline()
+    QualityScores = infile.readline()
+
+    if not SequenceID:
+      break
+
+    counter_TotalReads += 1
+
+    #Remove the first base which is error prone
+    Sequence = Sequence.rstrip("\n")
+    Sequence = Sequence[1:]
+    QualityScores = QualityScores.rstrip("\n")
+    QualityScores = QualityScores[1:]
+	
+    #Remove/count reads with more than 30% Ns
+    if Sequence.count("N") > len(Sequence)/3:
+      counter_PoorQuality += 1
+			
+    else:
+      repLength = GetRepLength(Sequence)
+
+      if repLength == 0:
+        counter_NoRepeats += 1
+      elif repLength == 1:
+        counter_AbnormalRepeatLength += 1
+      else:
+        RepeatLengths[repLength] += 1
+        flag, rep1, rep2, rep3, q1, q2, q3 = OptimizeReps(Sequence, QualityScores, repLength)
+
+        if flag == 0:
+          counter_LowIdentity += 1
+        else:
+          counter_ConsensusSequences += 1
+          consensus, consensusQ = CombineReps(rep1, rep2, rep3, q1, q2, q3)
 								
-                        outfile.write(SequenceID)
-                        outfile.write(ConsensusSequence + "\n")
-                        outfile.write(EmptyLine)
-                        outfile.write(ReCalculatedQualityScores + "\n")
-							
-    return counter_PoorQuality, counter_NoRepeats, counter_AbnormalRepeatLength, counter_LowIdentity, counter_ConsensusSequences, counter_TotalReads, RepeatLengths
+          outfile.write(SequenceID)
+          outfile.write(consensus + "\n")
+          outfile.write(EmptyLine)
+          outfile.write(consensusQ + "\n")
+
+  return counter_PoorQuality, counter_NoRepeats, counter_AbnormalRepeatLength, \
+         counter_LowIdentity, counter_ConsensusSequences, counter_TotalReads, \
+         RepeatLengths
