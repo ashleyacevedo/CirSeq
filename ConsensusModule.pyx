@@ -72,7 +72,7 @@ def OptimizeReps(Sequence, Qscores, repLength):
 
   identityScores = []
   i = 0
-  while i < len(Sequence) - repLength * 3:
+  while i <= len(Sequence) - repLength * 3:
     identity = 0
     rep1 = Sequence[i:i+repLength]
     rep2 = Sequence[i+repLength:i+repLength*2]
